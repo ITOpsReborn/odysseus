@@ -12,6 +12,7 @@ PASS=0
 FAIL=0
 WARN=0
 TEST_IMAGE="${ODYSSEUS_INTEL_TEST_IMAGE:-alpine:3.20}"
+MAX_CLINFO_LINES=12
 
 _pass() { printf '\033[32m[PASS]\033[0m %s\n' "$*"; PASS=$((PASS + 1)); }
 _fail() { printf '\033[31m[FAIL]\033[0m %s\n' "$*"; FAIL=$((FAIL + 1)); }
@@ -85,7 +86,7 @@ _check_host_tools() {
         if clinfo 2>/dev/null | grep -Eq 'Intel|Level-Zero|OpenCL'; then
             _pass "clinfo can see an Intel/Level Zero/OpenCL device on the host."
             clinfo 2>/dev/null | grep -E 'Device Name|Platform Name|Driver Version' \
-                | head -12 \
+                | head -"${MAX_CLINFO_LINES}" \
                 | sed 's/^/        /'
         else
             _warn "clinfo is installed but did not report an Intel GPU."
