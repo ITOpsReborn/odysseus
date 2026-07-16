@@ -84,8 +84,7 @@ _check_host_tools() {
     if command -v clinfo >/dev/null 2>&1; then
         if clinfo 2>/dev/null | grep -Eq 'Intel|Level-Zero|OpenCL'; then
             _pass "clinfo can see an Intel/Level Zero/OpenCL device on the host."
-            clinfo 2>/dev/null \
-                | grep -E 'Device Name|Platform Name|Driver Version' \
+            clinfo 2>/dev/null | grep -E 'Device Name|Platform Name|Driver Version' \
                 | head -12 \
                 | sed 's/^/        /'
         else
