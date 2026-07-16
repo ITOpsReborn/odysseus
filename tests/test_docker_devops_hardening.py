@@ -16,6 +16,7 @@ COMPOSE_FILES = [
     ROOT / "docker-compose.yml",
     ROOT / "docker-compose.gpu-nvidia.yml",
     ROOT / "docker-compose.gpu-amd.yml",
+    ROOT / "docker-compose.gpu-intel.yml",
 ]
 HOST_DOCKER_OVERLAY = ROOT / "docker" / "host-docker.yml"
 TEST_DOCS = [
