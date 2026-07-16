@@ -1,0 +1,25 @@
+# Intel Arc Pro B60 GPU overlay for Docker inside Ubuntu on WSL2. Enable with:
+#   COMPOSE_FILE=docker-compose.yml:docker/gpu.intel.yml
+#
+# Target host: Windows + Ubuntu under WSL2 + Docker.
+# WSL2 exposes the Intel GPU bridge through /dev/dxg and /usr/lib/wsl/lib
+# rather than the native-Linux /dev/dri render nodes used by the AMD overlay.
+#
+# Requires:
+#   - A Windows host with current Intel Arc Pro B60 graphics drivers
+#   - Ubuntu in WSL2 with /dev/dxg and /usr/lib/wsl/lib present
+#   - Docker running inside that WSL distro
+#
+# This overlay only passes the WSL GPU bridge into the container.
+# The slim Odysseus image does not bundle Intel oneAPI / Level Zero / OpenCL
+# userspace or Intel-tuned inference engines — install compatible llama.cpp /
+# Ollama / other Intel-capable userspace via Cookbook -> Dependencies (or pip)
+# before serving GPU models.
+services:
+  odysseus:
+    devices:
+      - /dev/dxg
+    volumes:
+      - /usr/lib/wsl/lib:/usr/lib/wsl/lib:ro
+    environment:
+      - LD_LIBRARY_PATH=/usr/lib/wsl/lib

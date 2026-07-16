@@ -124,6 +124,8 @@ required:
 COMPOSE_FILE=docker-compose.yml:docker/gpu.nvidia.yml:docker/host-docker.yml
 # or
 COMPOSE_FILE=docker-compose.yml:docker/gpu.amd.yml:docker/host-docker.yml
+# or
+COMPOSE_FILE=docker-compose.yml:docker/gpu.intel.yml:docker/host-docker.yml
 ```
 
 **Docker GPU overlays.** CPU-only users can skip this section. Cookbook can
@@ -180,7 +182,29 @@ COMPOSE_FILE=docker-compose.yml:docker/gpu.amd.yml
 RENDER_GID=989
 ```
 
-For NVIDIA/AMD GPU support, also read the comments in the selected overlay file: docker/gpu.nvidia.yml or docker/gpu.amd.yml.
+**Intel Arc Pro B60 on Windows + WSL2.** WSL exposes the GPU bridge through
+`/dev/dxg` and `/usr/lib/wsl/lib`, not through native-Linux `/dev/dri`
+render nodes. Run the read-only diagnostic from inside your Ubuntu WSL distro:
+
+```bash
+scripts/check-docker-intel-gpu.sh
+```
+
+Then add this to `.env`:
+
+```bash
+COMPOSE_FILE=docker-compose.yml:docker/gpu.intel.yml
+```
+
+Before enabling the overlay, confirm the WSL distro itself sees the bridge:
+
+```bash
+test -e /dev/dxg && test -d /usr/lib/wsl/lib
+```
+
+For NVIDIA/AMD/Intel GPU support, also read the comments in the selected
+overlay file: `docker/gpu.nvidia.yml`, `docker/gpu.amd.yml`, or
+`docker/gpu.intel.yml`.
 
 **Stack-management UIs (Portainer, Coolify, Dockhand, etc.).** These tools
 often accept only a single Compose file and do not reliably honor `COMPOSE_FILE`
@@ -192,6 +216,9 @@ files instead, which bundle the base stack plus the GPU settings:
   on the host.
 - `docker-compose.gpu-amd.yml` — still requires host ROCm/kfd/DRI setup, the
   `video`/`render` group membership, and `RENDER_GID` when needed.
+- `docker-compose.gpu-intel.yml` — targets Windows + Ubuntu on WSL2 with an
+  Intel Arc Pro B60 and passes `/dev/dxg` plus `/usr/lib/wsl/lib` into the
+  container.
 
 The base `docker-compose.yml` plus the `docker/gpu.*.yml` overlays remain the
 source of truth; the standalone files mirror them for single-file deployments.
@@ -201,6 +228,7 @@ Verify after enabling either overlay:
 ```bash
 docker compose exec odysseus nvidia-smi -L   # NVIDIA
 docker compose exec odysseus sh -lc 'test -e /dev/kfd && test -d /dev/dri && ls -l /dev/kfd /dev/dri/renderD*'  # AMD
+docker compose exec odysseus sh -lc 'test -e /dev/dxg && test -d /usr/lib/wsl/lib && echo $LD_LIBRARY_PATH && ls -l /dev/dxg /usr/lib/wsl/lib | head'  # Intel Arc Pro B60 on WSL2
 ```
 
 > **GPU passthrough ≠ llama.cpp CUDA.** `nvidia-smi` passing inside the
@@ -215,6 +243,11 @@ docker compose exec odysseus sh -lc 'test -e /dev/kfd && test -d /dev/dri && ls 
 > the container confirms device passthrough, not ROCm userspace or a
 > ROCm-enabled vLLM/llama.cpp build. `rocm-smi` and `rocminfo` are not expected
 > inside the slim Odysseus image.
+>
+> The Intel Arc Pro B60 WSL overlay follows the same rule: seeing `/dev/dxg`
+> and `/usr/lib/wsl/lib` inside the container confirms WSL GPU bridge access,
+> not Intel oneAPI/Level Zero/OpenCL userspace or an Intel-capable serve
+> backend. The slim Odysseus image does not bundle those pieces.
 
 **Ollama with Docker.** If Ollama runs on the host, add this endpoint in
 Settings:
@@ -297,6 +330,62 @@ model downloads and the agent shell tool, also install
 Local GPU *serving* of vLLM/SGLang needs Linux/WSL2; for a local model on Windows,
 [Ollama](https://ollama.com/download) is the easiest path — point Odysseus at
 `http://localhost:11434/v1` in Settings.
+
+### Windows host + Ubuntu on WSL2 + Docker + Intel Arc Pro B60
+
+Use this path when Odysseus itself will run in Docker inside Ubuntu on WSL2 and
+you want Cookbook to see an **Intel Arc Pro B60**.
+
+**Prerequisites**
+
+- Windows 11/10 with WSL2 GPU support enabled.
+- A current Windows Intel Arc Pro B60 graphics driver.
+- Ubuntu running under WSL2, with both `/dev/dxg` and `/usr/lib/wsl/lib`
+  present inside the distro.
+- Docker running in that same WSL distro (Docker Desktop WSL integration or a
+  native Docker Engine install).
+- If you plan to run Intel-native serving stacks inside WSL or a custom image,
+  install the current Intel Level Zero / OpenCL userspace for your Ubuntu
+  release there as well. Odysseus does not install those host packages for you.
+
+**Setup**
+
+```bash
+git clone https://github.com/pewdiepie-archdaemon/odysseus.git
+cd odysseus
+cp .env.example .env
+scripts/check-docker-intel-gpu.sh
+```
+
+If the script passes, set:
+
+```bash
+COMPOSE_FILE=docker-compose.yml:docker/gpu.intel.yml
+```
+
+Then start Odysseus:
+
+```bash
+docker compose up -d --build
+```
+
+**Verify**
+
+```bash
+docker compose exec odysseus sh -lc 'test -e /dev/dxg && test -d /usr/lib/wsl/lib && echo $LD_LIBRARY_PATH && ls -l /dev/dxg /usr/lib/wsl/lib | head'
+docker compose logs --tail=120 odysseus
+```
+
+**Known constraints**
+
+- The Intel WSL overlay is for Docker inside Ubuntu on WSL2; it is not the same
+  as native Linux Intel `/dev/dri` passthrough.
+- The overlay only passes the WSL GPU bridge into the container. It does **not**
+  by itself install Intel oneAPI / Level Zero / OpenCL userspace or guarantee
+  that a given serving backend has an Intel-capable build.
+- If you already run Ollama or another OpenAI-compatible server on the Windows
+  host, that is often the simplest path: keep Odysseus in Docker and point it at
+  `http://host.docker.internal:11434/v1` instead of serving models in-container.
 
 Open `http://localhost:7000`, log in with the generated admin password,
 and configure everything else inside **Settings**.
