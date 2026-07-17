@@ -22,11 +22,13 @@ NVIDIA_OVERLAY = ROOT / "docker" / "gpu.nvidia.yml"
 AMD_OVERLAY = ROOT / "docker" / "gpu.amd.yml"
 INTEL_OVERLAY = ROOT / "docker" / "gpu.intel.yml"
 IPEX_XPU_OVERLAY = ROOT / "docker" / "gpu.ipex-xpu.yml"
+IPEX_XPU_WSL_OVERLAY = ROOT / "docker" / "gpu.ipex-xpu-wsl.yml"
 HOST_DOCKER_OVERLAY = ROOT / "docker" / "host-docker.yml"
 NVIDIA_STANDALONE = ROOT / "docker-compose.gpu-nvidia.yml"
 AMD_STANDALONE = ROOT / "docker-compose.gpu-amd.yml"
 INTEL_STANDALONE = ROOT / "docker-compose.gpu-intel.yml"
 IPEX_XPU_STANDALONE = ROOT / "docker-compose.gpu-ipex-xpu.yml"
+IPEX_XPU_WSL_STANDALONE = ROOT / "docker-compose.gpu-ipex-xpu-wsl.yml"
 
 SERVICE = "odysseus"
 
@@ -331,5 +333,74 @@ def test_ipex_xpu_base_services_unchanged(base):
 
 def test_ipex_xpu_top_level_volumes_match_base(base):
     standalone = _load(IPEX_XPU_STANDALONE)
+    assert standalone.get("volumes") == base.get("volumes")
+
+
+# --- Intel IPEX-LLM XPU (WSL2) --------------------------------------------
+
+
+def test_ipex_xpu_wsl_standalone_equals_base_plus_overlay(base):
+    overlay = _load(IPEX_XPU_WSL_OVERLAY)
+    standalone = _load(IPEX_XPU_WSL_STANDALONE)
+    assert standalone == _merge_overlay_with_new_services(base, overlay)
+
+
+def test_ipex_xpu_wsl_odysseus_adds_only_overlay(base):
+    standalone = _load(IPEX_XPU_WSL_STANDALONE)
+    svc = standalone["services"][SERVICE]
+    base_svc = base["services"][SERVICE]
+
+    # WSL GPU bridge device; no /dev/dri or group_add.
+    assert "devices" not in base_svc
+    assert svc["devices"] == ["/dev/dxg"]
+    assert "group_add" not in svc
+
+    # WSL library volume is appended.
+    added_volumes = set(svc["volumes"]) - set(base_svc["volumes"])
+    assert added_volumes == {"/usr/lib/wsl/lib:/usr/lib/wsl/lib:ro"}
+
+    # LD_LIBRARY_PATH is appended to environment.
+    added_env = set(svc["environment"]) - set(base_svc["environment"])
+    assert added_env == {"LD_LIBRARY_PATH=/usr/lib/wsl/lib"}
+
+    # No NVIDIA-specific keys, no native-Linux DRI groups.
+    assert "deploy" not in svc
+
+
+def test_ipex_xpu_wsl_standalone_has_ipex_llm_service():
+    overlay = _load(IPEX_XPU_WSL_OVERLAY)
+    standalone = _load(IPEX_XPU_WSL_STANDALONE)
+    assert "ipex-llm" in standalone["services"]
+    assert standalone["services"]["ipex-llm"] == overlay["services"]["ipex-llm"]
+
+
+def test_ipex_xpu_wsl_ipex_llm_service_shape():
+    standalone = _load(IPEX_XPU_WSL_STANDALONE)
+    svc = standalone["services"]["ipex-llm"]
+
+    assert svc["image"] == "intel/ipex-llm-inference-xpu:latest"
+    # WSL bridge device; no /dev/dri or render-group entries.
+    assert svc["devices"] == ["/dev/dxg"]
+    assert "group_add" not in svc
+    # WSL library volume plus the model cache.
+    assert "/usr/lib/wsl/lib:/usr/lib/wsl/lib:ro" in svc["volumes"]
+    hf_vol = "${APP_DATA_DIR:-./data}/huggingface:/root/.cache/huggingface:z"
+    assert hf_vol in svc["volumes"]
+    assert "127.0.0.1:8000:8000" in svc["ports"]
+    assert "MODEL_PATH=${IPEX_LLM_MODEL:-}" in svc["environment"]
+    assert "IPEX_LLM_LOAD_IN_LOW_BIT=${IPEX_LLM_LOAD_IN_LOW_BIT:-sym_int4}" in svc["environment"]
+    assert "LD_LIBRARY_PATH=/usr/lib/wsl/lib" in svc["environment"]
+
+
+def test_ipex_xpu_wsl_base_services_unchanged(base):
+    standalone = _load(IPEX_XPU_WSL_STANDALONE)
+    for name, definition in base["services"].items():
+        if name == SERVICE:
+            continue
+        assert standalone["services"][name] == definition
+
+
+def test_ipex_xpu_wsl_top_level_volumes_match_base(base):
+    standalone = _load(IPEX_XPU_WSL_STANDALONE)
     assert standalone.get("volumes") == base.get("volumes")
 

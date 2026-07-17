@@ -60,7 +60,7 @@ _check_not_wsl() {
     _info "Checking execution environment..."
     if grep -Eiq '(microsoft|wsl)' /proc/version 2>/dev/null; then
         _warn "WSL environment detected. This overlay targets native Linux Intel Arc."
-        _info "For Intel Arc on Windows + WSL2, use: scripts/check-docker-intel-gpu.sh"
+        _info "For Intel Arc on Windows + WSL2 with IPEX-LLM, use: scripts/check-docker-ipex-xpu-wsl-gpu.sh"
     else
         _pass "Running on native Linux (not WSL)."
     fi
