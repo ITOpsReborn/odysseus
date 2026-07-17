@@ -49,7 +49,7 @@ _APPLE_VARIANT_KEYS_SORTED = sorted(APPLE_BANDWIDTH_BY_CORES.keys(), key=len, re
 
 # metal: backstop for Apple Silicon chips not in the explicit tables above
 # (e.g. a future M6) — use a conservative generic estimate when unknown.
-FALLBACK_K = {"cuda": 220, "rocm": 180, "metal": 150, "cpu_x86": 70, "cpu_arm": 90}
+FALLBACK_K = {"cuda": 220, "rocm": 180, "metal": 150, "xpu": 150, "cpu_x86": 70, "cpu_arm": 90}
 
 USE_CASE_WEIGHTS = {
     "general":    (0.45, 0.30, 0.15, 0.10),
