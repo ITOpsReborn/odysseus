@@ -306,6 +306,123 @@ def _detect_amd():
         return None
 
 
+def _detect_intel():
+    """Detect Intel GPUs in WSL / Linux container contexts.
+
+    Probes (best-effort, in order):
+    1. /dev/dxg  — WSL GPU compute bridge; its presence confirms Intel Arc on
+       WSL even when no DRM node is visible inside the container.
+    2. /usr/lib/wsl/lib  — WSL GPU userspace library directory.
+    3. Intel DRM render nodes  — /sys/class/drm cardN with vendor 0x8086; used
+       when running on bare-metal Linux or a VM with DRI passthrough.
+    4. clinfo  — parses OpenCL platform for device name and global memory size.
+    5. sycl-ls  — lists Level Zero / SYCL devices as a secondary name source.
+
+    VRAM falls back to 8 GB when none of the probes can read it directly —
+    conservative enough to avoid recommending models larger than the card.
+
+    backend="xpu" is Intel's oneAPI GPU compute label (the same string that
+    ipex / torch.xpu use).  It is non-CPU so the UI no longer says "no GPU",
+    but Odysseus makes no claim that a serving backend is fully integrated yet.
+    """
+
+    def _path_exists(path):
+        if _remote_host:
+            return _run(["test", "-e", path]) is not None
+        return os.path.exists(path)
+
+    def _dir_exists(path):
+        if _remote_host:
+            return _run(["test", "-d", path]) is not None
+        return os.path.isdir(path)
+
+    def _list_drm_cards():
+        _is_card = lambda e: e.startswith("card") and "-" not in e
+        if _remote_host:
+            out = _run(["ls", "/sys/class/drm"])
+            if not out:
+                return []
+            return [e for e in out.split() if _is_card(e)]
+        try:
+            return [e for e in os.listdir("/sys/class/drm") if _is_card(e)]
+        except Exception:
+            return []
+
+    def _read(path):
+        if _remote_host:
+            val = _run(["cat", path])
+            return val.strip() if val else None
+        try:
+            with open(path, encoding="utf-8", errors="replace") as f:
+                return f.read().strip()
+        except Exception:
+            return None
+
+    try:
+        # --- Signal 1 & 2: WSL GPU bridge ---
+        has_dxg = _path_exists("/dev/dxg")
+        has_wsl_lib = _dir_exists("/usr/lib/wsl/lib")
+
+        # --- Signal 3: Intel DRM render node ---
+        intel_cards = []
+        for entry in _list_drm_cards():
+            base = f"/sys/class/drm/{entry}/device"
+            vendor = _read(f"{base}/vendor")
+            if vendor == "0x8086":
+                intel_cards.append(entry)
+
+        if not has_dxg and not has_wsl_lib and not intel_cards:
+            return None
+
+        # --- Derive GPU name ---
+        gpu_name = "Intel Arc GPU"
+        vram_gb = 8.0  # conservative fallback when VRAM is not directly queryable
+
+        # Try DRM product name first (most reliable when present)
+        for entry in intel_cards:
+            base = f"/sys/class/drm/{entry}/device"
+            name = _read(f"{base}/product_name")
+            if name:
+                gpu_name = name
+                break
+
+        # Try clinfo for name and VRAM (works in WSL when oneAPI userspace is present)
+        clinfo_out = _run(["clinfo"]) or ""
+        if clinfo_out:
+            # "Device Name  Intel(R) Arc(TM) B580 Graphics" (standard output)
+            m = re.search(r"Device Name\s+(.+Intel[^\n]+)", clinfo_out)
+            if m:
+                gpu_name = m.group(1).strip()
+            # "Global Memory Size  12884901888 (12 GiB)"
+            m = re.search(r"Global Memory Size\s+(\d+)", clinfo_out)
+            if m:
+                size_bytes = int(m.group(1))
+                if size_bytes > 0:
+                    vram_gb = round(size_bytes / (1024 ** 3), 1)
+
+        # Try sycl-ls as a secondary name source
+        if gpu_name == "Intel Arc GPU":
+            sycl_out = _run(["sycl-ls"]) or ""
+            if sycl_out:
+                # "[opencl:gpu:0] Intel(R) OpenCL Graphics, Intel(R) Arc(TM) B580 ..."
+                m = re.search(r"Intel[^\n,]*Arc[^\n,]*", sycl_out)
+                if m:
+                    gpu_name = m.group(0).strip()
+
+        gpu = {"index": 0, "name": gpu_name, "vram_gb": vram_gb}
+        return {
+            "gpu_name": gpu_name,
+            "gpu_vram_gb": vram_gb,
+            "gpu_count": 1,
+            "gpus": [gpu],
+            "gpu_groups": _group_gpus([gpu]),
+            "homogeneous": True,
+            "backend": "xpu",
+        }
+    except Exception:
+        return None
+
+
 def _detect_apple_silicon():
     """Detect Apple Silicon (M-series) GPUs.
 
@@ -859,7 +976,7 @@ def detect_system(host="", ssh_port="", platform="", fresh=False):
     cpu_name = _get_cpu_name()
     cpu_arch = _get_cpu_arch()
 
-    gpu_info = _detect_apple_silicon() or _detect_nvidia() or _detect_amd()
+    gpu_info = _detect_apple_silicon() or _detect_nvidia() or _detect_amd() or _detect_intel()
 
     if gpu_info:
         result = {
