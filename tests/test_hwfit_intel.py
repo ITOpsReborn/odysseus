@@ -94,7 +94,6 @@ def test_detects_via_dxg_only(monkeypatch):
 
     info = hardware._detect_intel()
     assert info is not None
-    assert info["has_gpu"] if "has_gpu" in info else True  # returned dict doesn't have has_gpu
     assert info["backend"] == "xpu"
     assert info["gpu_count"] == 1
     assert info["gpu_vram_gb"] == 8.0  # conservative fallback
@@ -164,7 +163,7 @@ def test_clinfo_parses_name_and_vram(monkeypatch):
         return False
 
     def fake_run(cmd):
-        if isinstance(cmd, list) and "clinfo" in cmd[0]:
+        if isinstance(cmd, list) and len(cmd) > 0 and "clinfo" in cmd[0]:
             return _CLINFO_ARC_B580
         return None
 
@@ -191,7 +190,7 @@ def test_clinfo_vram_fallback_on_zero(monkeypatch):
         return False
 
     def fake_run(cmd):
-        if isinstance(cmd, list) and "clinfo" in cmd[0]:
+        if isinstance(cmd, list) and len(cmd) > 0 and "clinfo" in cmd[0]:
             return clinfo_zero
         return None
 
@@ -225,7 +224,7 @@ def test_sycl_ls_provides_name(monkeypatch):
         return False
 
     def fake_run(cmd):
-        if isinstance(cmd, list) and cmd[0] == "sycl-ls":
+        if isinstance(cmd, list) and len(cmd) > 0 and cmd[0] == "sycl-ls":
             return _SYCL_LS_B580
         return None
 
@@ -310,7 +309,7 @@ def test_result_shape_is_complete(monkeypatch):
         return False
 
     def fake_run(cmd):
-        if isinstance(cmd, list) and "clinfo" in cmd[0]:
+        if isinstance(cmd, list) and len(cmd) > 0 and "clinfo" in cmd[0]:
             return _CLINFO_ARC_B580
         return None
 

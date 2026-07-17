@@ -337,13 +337,14 @@ def _detect_intel():
         return os.path.isdir(path)
 
     def _list_drm_cards():
+        _is_card = lambda e: e.startswith("card") and "-" not in e
         if _remote_host:
             out = _run(["ls", "/sys/class/drm"])
             if not out:
                 return []
-            return [e for e in out.split() if e.startswith("card") and "-" not in e]
+            return [e for e in out.split() if _is_card(e)]
         try:
-            return [e for e in os.listdir("/sys/class/drm") if e.startswith("card") and "-" not in e]
+            return [e for e in os.listdir("/sys/class/drm") if _is_card(e)]
         except Exception:
             return []
 
