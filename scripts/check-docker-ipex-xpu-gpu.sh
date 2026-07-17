@@ -25,8 +25,8 @@ _usage() {
     cat <<'USAGE'
 Usage: scripts/check-docker-ipex-xpu-gpu.sh
 
-Read-only Intel IPEX-LLM XPU (native Linux) Docker diagnostic. Installs
-nothing, edits nothing, and does not restart Docker.
+Read-only Intel IPEX-LLM XPU (native Linux) Docker diagnostic. This script
+installs nothing, edits nothing, and does not restart Docker.
 
 Checks:
   - NOT running inside WSL (this overlay is for bare-metal / native-VM Linux)
