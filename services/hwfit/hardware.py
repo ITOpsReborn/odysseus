@@ -374,9 +374,22 @@ def _detect_intel():
         if not has_dxg and not has_wsl_lib and not intel_cards:
             return None
 
+        # --- Classify environment ---
+        # wsl_gpu_bridge: true when detection relies on WSL signals rather than
+        # native Linux DRM nodes — lets callers emit WSL-specific UX context.
+        # wsl_dri_absent: true when in WSL mode and /dev/dri DRM nodes are absent,
+        # which means standard Linux GPU compute paths won't work as-is.
+        wsl_gpu_bridge = bool(has_dxg or has_wsl_lib) and not intel_cards
+        wsl_dri_absent = wsl_gpu_bridge  # /dev/dri DRM absent iff no native cards
+
         # --- Derive GPU name ---
         gpu_name = "Intel Arc GPU"
         vram_gb = 8.0  # conservative fallback when VRAM is not directly queryable
+
+        # Track whether xpu userspace tools (clinfo / sycl-ls) confirmed the device.
+        # When False in WSL mode the oneAPI stack is absent and launches will fall
+        # back to CPU until the stack is installed.
+        xpu_confirmed = bool(intel_cards)  # DRM path always counts as confirmed
 
         # Try DRM product name first (most reliable when present)
         for entry in intel_cards:
@@ -393,6 +406,7 @@ def _detect_intel():
             m = re.search(r"Device Name\s+(.+Intel[^\n]+)", clinfo_out)
             if m:
                 gpu_name = m.group(1).strip()
+                xpu_confirmed = True
             # "Global Memory Size  12884901888 (12 GiB)"
             m = re.search(r"Global Memory Size\s+(\d+)", clinfo_out)
             if m:
@@ -408,6 +422,7 @@ def _detect_intel():
                 m = re.search(r"Intel[^\n,]*Arc[^\n,]*", sycl_out)
                 if m:
                     gpu_name = m.group(0).strip()
+                    xpu_confirmed = True
 
         gpu = {"index": 0, "name": gpu_name, "vram_gb": vram_gb}
         return {
@@ -418,6 +433,11 @@ def _detect_intel():
             "gpu_groups": _group_gpus([gpu]),
             "homogeneous": True,
             "backend": "xpu",
+            # WSL context flags — passed through to detect_system() so the UI
+            # can display an actionable status message for Docker-on-WSL users.
+            "wsl_gpu_bridge": wsl_gpu_bridge,
+            "wsl_dri_absent": wsl_dri_absent,
+            "wsl_xpu_confirmed": xpu_confirmed,
         }
     except Exception:
         return None
@@ -866,6 +886,42 @@ def _hardware_visibility_warning(result):
             ],
         }
 
+    # WSL GPU bridge: /dev/dxg present, /dev/dri absent.  The Intel Arc GPU is
+    # visible to Odysseus but requires Intel oneAPI userspace (Level Zero /
+    # OpenCL) to actually run GPU-accelerated inference inside the container.
+    if result.get("wsl_gpu_bridge"):
+        if not result.get("wsl_xpu_confirmed"):
+            return {
+                "code": "wsl_gpu_bridge_no_xpu",
+                "severity": "warning",
+                "title": "WSL GPU bridge detected — oneAPI userspace not confirmed",
+                "message": (
+                    "Intel Arc GPU detected via the WSL /dev/dxg bridge; "
+                    "Linux DRM /dev/dri is unavailable (normal on Docker-on-WSL). "
+                    "Intel oneAPI / Level Zero userspace was not found inside the container "
+                    "— model launches will run on CPU until the Intel compute stack is installed. "
+                    "For native Linux DRM acceleration, run Odysseus on a bare-metal Linux host."
+                ),
+                "actions": [
+                    "rescan",
+                    "copy_diagnostics",
+                ],
+            }
+        return {
+            "code": "wsl_gpu_bridge_xpu_ready",
+            "severity": "info",
+            "title": "WSL GPU bridge active",
+            "message": (
+                "Intel Arc GPU detected via the WSL /dev/dxg bridge; "
+                "Linux DRM /dev/dri is unavailable (normal on Docker-on-WSL). "
+                "Intel oneAPI / Level Zero userspace is available — xpu backend ready."
+            ),
+            "actions": [
+                "rescan",
+                "copy_diagnostics",
+            ],
+        }
+
     total_ram = result.get("total_ram_gb") or 0
     if total_ram and total_ram <= 8:
         return {
@@ -997,6 +1053,14 @@ def detect_system(host="", ssh_port="", platform="", fresh=False):
             # Apple Silicon / AMD APUs share system RAM with the GPU — carry the
             # flag through so callers can tell unified from discrete VRAM.
             "unified_memory": gpu_info.get("unified_memory", False),
+            # WSL Intel Arc context: wsl_gpu_bridge=True when the Intel GPU was
+            # detected via /dev/dxg or /usr/lib/wsl/lib rather than native DRM.
+            # wsl_dri_absent=True when Linux /dev/dri nodes are absent (normal in
+            # Docker-on-WSL). wsl_xpu_confirmed=True when clinfo/sycl-ls verified
+            # the oneAPI compute stack is available. Absent for non-Intel backends.
+            "wsl_gpu_bridge": gpu_info.get("wsl_gpu_bridge", False),
+            "wsl_dri_absent": gpu_info.get("wsl_dri_absent", False),
+            "wsl_xpu_confirmed": gpu_info.get("wsl_xpu_confirmed", False),
         }
     else:
         backend = "cpu_arm" if cpu_arch == "arm64" else "cpu_x86"
