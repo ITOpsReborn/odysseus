@@ -1,0 +1,42 @@
+# Intel IPEX-LLM XPU overlay for Odysseus. Enable with:
+#   COMPOSE_FILE=docker-compose.yml:docker/gpu.ipex-xpu.yml
+#
+# This overlay rebuilds Odysseus on top of Intel's ipex-llm-inference-cpp-xpu
+# base image, which bundles the Intel oneAPI / Level Zero / OpenCL userspace
+# needed for Intel Arc XPU inference. It also passes the WSL2 GPU bridge into
+# the container.
+#
+# Target host (primary — WSL2 path):
+#   Windows + Ubuntu under WSL2 + Docker with Intel Arc GPU.
+#   WSL2 exposes the Intel GPU bridge through /dev/dxg and /usr/lib/wsl/lib
+#   rather than native-Linux /dev/dri render nodes.
+#
+# Requirements:
+#   - A Windows host with current Intel Arc graphics drivers
+#   - Ubuntu in WSL2 with /dev/dxg and /usr/lib/wsl/lib present
+#     (run: test -e /dev/dxg && test -d /usr/lib/wsl/lib)
+#   - Docker running inside that WSL distro
+#
+# Unlike docker/gpu.intel.yml (which passes WSL devices into the standard
+# slim Odysseus image), this overlay also switches the build to Dockerfile.ipex
+# so Odysseus itself runs inside the Intel IPEX-LLM runtime environment.
+#
+# Verify after enabling:
+#   docker compose exec odysseus sh -lc \
+#     'test -e /dev/dxg && test -d /usr/lib/wsl/lib \
+#      && echo "WSL GPU bridge OK" \
+#      && python -c "import ipex_llm; print(ipex_llm.__version__)"'
+#
+# Combine with host Docker access when also needed:
+#   COMPOSE_FILE=docker-compose.yml:docker/gpu.ipex-xpu.yml:docker/host-docker.yml
+services:
+  odysseus:
+    build:
+      context: .
+      dockerfile: Dockerfile.ipex
+    devices:
+      - /dev/dxg
+    volumes:
+      - /usr/lib/wsl/lib:/usr/lib/wsl/lib:ro
+    environment:
+      - LD_LIBRARY_PATH=/usr/lib/wsl/lib

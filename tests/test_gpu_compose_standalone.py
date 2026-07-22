@@ -21,10 +21,12 @@ BASE = ROOT / "docker-compose.yml"
 NVIDIA_OVERLAY = ROOT / "docker" / "gpu.nvidia.yml"
 AMD_OVERLAY = ROOT / "docker" / "gpu.amd.yml"
 INTEL_OVERLAY = ROOT / "docker" / "gpu.intel.yml"
+IPEX_XPU_OVERLAY = ROOT / "docker" / "gpu.ipex-xpu.yml"
 HOST_DOCKER_OVERLAY = ROOT / "docker" / "host-docker.yml"
 NVIDIA_STANDALONE = ROOT / "docker-compose.gpu-nvidia.yml"
 AMD_STANDALONE = ROOT / "docker-compose.gpu-amd.yml"
 INTEL_STANDALONE = ROOT / "docker-compose.gpu-intel.yml"
+IPEX_XPU_STANDALONE = ROOT / "docker-compose.gpu-ipex-xpu.yml"
 
 SERVICE = "odysseus"
 
@@ -97,11 +99,17 @@ def test_intel_standalone_equals_base_plus_overlay(base):
     assert standalone == _merge_overlay_into_base(base, overlay)
 
 
+def test_ipex_xpu_standalone_equals_base_plus_overlay(base):
+    overlay = _load(IPEX_XPU_OVERLAY)
+    standalone = _load(IPEX_XPU_STANDALONE)
+    assert standalone == _merge_overlay_into_base(base, overlay)
+
+
 # --- Non-odysseus services and volumes untouched ---------------------------
 
 
 @pytest.mark.parametrize(
-    "standalone_path", [NVIDIA_STANDALONE, AMD_STANDALONE, INTEL_STANDALONE]
+    "standalone_path", [NVIDIA_STANDALONE, AMD_STANDALONE, INTEL_STANDALONE, IPEX_XPU_STANDALONE]
 )
 def test_non_odysseus_services_match_base(base, standalone_path):
     standalone = _load(standalone_path)
@@ -113,7 +121,7 @@ def test_non_odysseus_services_match_base(base, standalone_path):
 
 
 @pytest.mark.parametrize(
-    "standalone_path", [NVIDIA_STANDALONE, AMD_STANDALONE, INTEL_STANDALONE]
+    "standalone_path", [NVIDIA_STANDALONE, AMD_STANDALONE, INTEL_STANDALONE, IPEX_XPU_STANDALONE]
 )
 def test_top_level_volumes_match_base(base, standalone_path):
     standalone = _load(standalone_path)
@@ -186,6 +194,31 @@ def test_intel_odysseus_adds_only_overlay(base):
     assert "deploy" not in svc
 
 
+def test_ipex_xpu_odysseus_adds_only_overlay(base):
+    standalone = _load(IPEX_XPU_STANDALONE)
+    svc = standalone["services"][SERVICE]
+    base_svc = base["services"][SERVICE]
+
+    # Build is changed to use Dockerfile.ipex.
+    assert svc["build"] == {"context": ".", "dockerfile": "Dockerfile.ipex"}
+    assert base_svc["build"] == "."
+
+    # WSL GPU bridge device is added.
+    assert "devices" not in base_svc
+    assert svc["devices"] == ["/dev/dxg"]
+
+    # WSL lib volume is appended.
+    added_volumes = set(svc["volumes"]) - set(base_svc["volumes"])
+    assert added_volumes == {"/usr/lib/wsl/lib:/usr/lib/wsl/lib:ro"}
+
+    # LD_LIBRARY_PATH is appended to the environment.
+    added_env = set(svc["environment"]) - set(base_svc["environment"])
+    assert added_env == {"LD_LIBRARY_PATH=/usr/lib/wsl/lib"}
+
+    assert "group_add" not in svc
+    assert "deploy" not in svc
+
+
 # --- Host Docker opt-in combinations ---------------------------------------
 
 
@@ -249,6 +282,23 @@ def test_intel_plus_host_docker_preserves_gpu_and_docker_access(base):
     )
     service = merged["services"][SERVICE]
 
+    assert service["devices"] == ["/dev/dxg"]
+    assert "/usr/lib/wsl/lib:/usr/lib/wsl/lib:ro" in service["volumes"]
+    assert "/var/run/docker.sock:/var/run/docker.sock" in service["volumes"]
+    assert "LD_LIBRARY_PATH=/usr/lib/wsl/lib" in service["environment"]
+    assert "ODYSSEUS_ENABLE_HOST_DOCKER=true" in service["environment"]
+    assert service["group_add"] == ["${DOCKER_GID:-963}"]
+
+
+def test_ipex_xpu_plus_host_docker_preserves_gpu_and_docker_access(base):
+    merged = _merge_overlays_into_base(
+        base,
+        _load(IPEX_XPU_OVERLAY),
+        _load(HOST_DOCKER_OVERLAY),
+    )
+    service = merged["services"][SERVICE]
+
+    assert service["build"] == {"context": ".", "dockerfile": "Dockerfile.ipex"}
     assert service["devices"] == ["/dev/dxg"]
     assert "/usr/lib/wsl/lib:/usr/lib/wsl/lib:ro" in service["volumes"]
     assert "/var/run/docker.sock:/var/run/docker.sock" in service["volumes"]

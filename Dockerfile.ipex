@@ -1,0 +1,95 @@
+# Intel IPEX-LLM based Odysseus image.
+#
+# Builds Odysseus on top of Intel's ipex-llm-inference-cpp-xpu base image,
+# which ships the Intel oneAPI / Level Zero / OpenCL userspace and an
+# Intel-optimised llama.cpp runtime for Intel Arc XPU inference.
+#
+# Use this image when you need Odysseus + Cookbook to perform local inference
+# directly on an Intel Arc GPU (native Linux /dev/dri or WSL2 /dev/dxg).
+# The standard Dockerfile does not bundle Intel XPU userspace; this one does.
+#
+# Build manually:
+#   docker build -f Dockerfile.ipex -t odysseus-ipex .
+#
+# Or use the compose overlay (recommended):
+#   COMPOSE_FILE=docker-compose.yml:docker/gpu.ipex-xpu.yml
+#
+# For WSL2 hosts, also see docker/gpu.ipex-xpu.yml and docs/setup.md.
+
+FROM intelanalytics/ipex-llm-inference-cpp-xpu:latest
+
+# Install additional runtime deps that Odysseus needs and that the Intel
+# base image does not provide. The base is Ubuntu-based; packages follow
+# Ubuntu 22.04 naming conventions.
+#
+# tmux         — required by Cookbook for background downloads/serves
+# openssh-client — required for Cookbook remote server tests/downloads/serves
+# git/cmake    — required when Cookbook builds llama.cpp on first launch
+# nodejs/npm   — provide npx for the optional built-in Browser MCP server
+# gosu         — lets the entrypoint drop privileges cleanly so signals
+#                reach uvicorn directly (no extra shell layer)
+# libgl1 / libglib2.0-0 / libxcb1 — runtime shared libs that opencv-python
+#                (cv2) loads; needed by the Real-ESRGAN Cookbook path
+# libmagic1    — shared lib (libmagic.so.1) for content-based MIME sniffing
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    cmake \
+    curl \
+    git \
+    nodejs \
+    npm \
+    tmux \
+    openssh-client \
+    gosu \
+    libgl1 \
+    libglib2.0-0 \
+    libxcb1 \
+    libmagic1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Docker CLI (client only — daemon stays on the host via the
+# /var/run/docker.sock mount). Same version pin as the main Dockerfile.
+ARG DOCKER_CLI_VERSION=27.5.1
+RUN ARCH="$(dpkg --print-architecture)" \
+    && case "$ARCH" in \
+         amd64) DARCH=x86_64 ;; \
+         arm64) DARCH=aarch64 ;; \
+         *) echo "unsupported arch $ARCH"; exit 1 ;; \
+       esac \
+    && curl -fsSL "https://download.docker.com/linux/static/stable/${DARCH}/docker-${DOCKER_CLI_VERSION}.tgz" \
+       -o /tmp/docker.tgz \
+    && tar -xzf /tmp/docker.tgz -C /tmp \
+    && install -m 0755 /tmp/docker/docker /usr/local/bin/docker \
+    && rm -rf /tmp/docker /tmp/docker.tgz
+
+WORKDIR /app
+
+# Install Odysseus Python deps on top of the Intel base Python environment.
+# The Intel image ships Python 3.11 and its own ML packages; we add the
+# Odysseus web-framework and tooling layer.
+# Optional extras (PyMuPDF AGPL, etc.) are opt-in via INSTALL_OPTIONAL.
+ARG INSTALL_OPTIONAL=false
+COPY requirements.txt requirements-optional.txt ./
+RUN pip install --no-cache-dir -r requirements.txt \
+    && if [ "$INSTALL_OPTIONAL" = "true" ]; then pip install --no-cache-dir -r requirements-optional.txt; fi
+
+# python-magic powers content-based MIME sniffing in src/upload_handler.py.
+# Image-only (not in requirements.txt) because it needs the libmagic1 system
+# lib installed above.
+RUN pip install --no-cache-dir python-magic==0.4.27
+
+# Copy app code
+COPY . .
+
+# Create data directory (mount a volume here for persistence)
+RUN mkdir -p data logs services/cache/search
+
+# Standard Odysseus entrypoint: drops to PUID/PGID (default 1000:1000) and
+# repairs ownership on bind-mounted /app/data and /app/logs.
+COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
+
+EXPOSE 7000
+
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "7000"]

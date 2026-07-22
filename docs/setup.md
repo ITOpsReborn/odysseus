@@ -126,6 +126,8 @@ COMPOSE_FILE=docker-compose.yml:docker/gpu.nvidia.yml:docker/host-docker.yml
 COMPOSE_FILE=docker-compose.yml:docker/gpu.amd.yml:docker/host-docker.yml
 # or
 COMPOSE_FILE=docker-compose.yml:docker/gpu.intel.yml:docker/host-docker.yml
+# or (ipex-xpu — Odysseus built on Intel IPEX-LLM image)
+COMPOSE_FILE=docker-compose.yml:docker/gpu.ipex-xpu.yml:docker/host-docker.yml
 ```
 
 **Docker GPU overlays.** CPU-only users can skip this section. Cookbook can
@@ -202,9 +204,23 @@ Before enabling the overlay, confirm the WSL distro itself sees the bridge:
 test -e /dev/dxg && test -d /usr/lib/wsl/lib
 ```
 
+**Intel Arc (IPEX-LLM) — Odysseus running on Intel's XPU runtime image.** This
+variant rebuilds Odysseus on top of `intelanalytics/ipex-llm-inference-cpp-xpu`,
+which bundles Intel oneAPI / Level Zero / OpenCL userspace for native Arc XPU
+inference. Use this when you want Cookbook's local inference to run directly on
+the Intel GPU inside the Odysseus container (rather than relying on a separately
+installed backend). Confirm the WSL bridge is visible first, then add to `.env`:
+
+```bash
+COMPOSE_FILE=docker-compose.yml:docker/gpu.ipex-xpu.yml
+```
+
+See [Windows host + WSL2 + Intel Arc (IPEX-LLM)](#windows-host--ubuntu-on-wsl2--docker--intel-arc-ipex-llm)
+below for full setup, build, and verification steps.
+
 For NVIDIA/AMD/Intel GPU support, also read the comments in the selected
-overlay file: `docker/gpu.nvidia.yml`, `docker/gpu.amd.yml`, or
-`docker/gpu.intel.yml`.
+overlay file: `docker/gpu.nvidia.yml`, `docker/gpu.amd.yml`,
+`docker/gpu.intel.yml`, or `docker/gpu.ipex-xpu.yml`.
 
 **Stack-management UIs (Portainer, Coolify, Dockhand, etc.).** These tools
 often accept only a single Compose file and do not reliably honor `COMPOSE_FILE`
@@ -219,6 +235,9 @@ files instead, which bundle the base stack plus the GPU settings:
 - `docker-compose.gpu-intel.yml` — targets Windows + Ubuntu on WSL2 with an
   Intel Arc Pro B60 and passes `/dev/dxg` plus `/usr/lib/wsl/lib` into the
   container.
+- `docker-compose.gpu-ipex-xpu.yml` — targets Windows + Ubuntu on WSL2 with
+  an Intel Arc GPU; rebuilds Odysseus on Intel's IPEX-LLM runtime image so
+  the XPU userspace is already inside the container.
 
 The base `docker-compose.yml` plus the `docker/gpu.*.yml` overlays remain the
 source of truth; the standalone files mirror them for single-file deployments.
@@ -229,6 +248,7 @@ Verify after enabling either overlay:
 docker compose exec odysseus nvidia-smi -L   # NVIDIA
 docker compose exec odysseus sh -lc 'test -e /dev/kfd && test -d /dev/dri && ls -l /dev/kfd /dev/dri/renderD*'  # AMD
 docker compose exec odysseus sh -lc 'test -e /dev/dxg && test -d /usr/lib/wsl/lib && echo $LD_LIBRARY_PATH && ls -l /dev/dxg /usr/lib/wsl/lib | head'  # Intel Arc Pro B60 on WSL2
+docker compose exec odysseus sh -lc 'test -e /dev/dxg && python -c "import ipex_llm; print(\"IPEX-LLM\", ipex_llm.__version__)"'  # Intel Arc IPEX-LLM
 ```
 
 > **GPU passthrough ≠ llama.cpp CUDA.** `nvidia-smi` passing inside the
@@ -386,6 +406,97 @@ docker compose logs --tail=120 odysseus
 - If you already run Ollama or another OpenAI-compatible server on the Windows
   host, that is often the simplest path: keep Odysseus in Docker and point it at
   `http://host.docker.internal:11434/v1` instead of serving models in-container.
+- For a setup where the Intel XPU runtime is bundled inside the Odysseus
+  container itself, use the IPEX-LLM variant below instead.
+
+Open `http://localhost:7000`, log in with the generated admin password,
+and configure everything else inside **Settings**.
+
+### Windows host + Ubuntu on WSL2 + Docker + Intel Arc (IPEX-LLM)
+
+Use this path when you want Odysseus and Cookbook's local inference to run
+**directly on an Intel Arc GPU** with the full XPU runtime bundled inside the
+Odysseus container. The Odysseus image is rebuilt on top of Intel's
+`intelanalytics/ipex-llm-inference-cpp-xpu` base image, which ships Intel
+oneAPI / Level Zero / OpenCL userspace and an Intel-optimised llama.cpp.
+
+The standard `docker/gpu.intel.yml` overlay only passes the WSL GPU bridge
+devices into the regular Odysseus image; it does not include Intel XPU
+userspace. This variant includes it, at the cost of a larger image and a
+longer first build.
+
+**Prerequisites**
+
+- Windows 11/10 with WSL2 GPU support enabled.
+- A current Windows Intel Arc graphics driver.
+- Ubuntu running under WSL2, with both `/dev/dxg` and `/usr/lib/wsl/lib`
+  present inside the distro.
+- Docker running in that same WSL distro (Docker Desktop WSL integration or a
+  native Docker Engine install).
+
+Confirm the WSL bridge is visible before proceeding:
+
+```bash
+test -e /dev/dxg && test -d /usr/lib/wsl/lib && echo "WSL GPU bridge OK"
+```
+
+**Setup**
+
+```bash
+git clone https://github.com/pewdiepie-archdaemon/odysseus.git
+cd odysseus
+cp .env.example .env
+```
+
+Add to `.env`:
+
+```bash
+COMPOSE_FILE=docker-compose.yml:docker/gpu.ipex-xpu.yml
+```
+
+Build and start Odysseus (the first build pulls the Intel base image and
+installs Odysseus deps — allow several minutes):
+
+```bash
+docker compose up -d --build
+```
+
+**Verify**
+
+```bash
+# Confirm the WSL GPU bridge is visible inside the container
+docker compose exec odysseus sh -lc \
+  'test -e /dev/dxg && test -d /usr/lib/wsl/lib \
+   && echo "WSL GPU bridge: OK" \
+   && echo "LD_LIBRARY_PATH=$LD_LIBRARY_PATH"'
+
+# Confirm the Intel IPEX-LLM runtime is present
+docker compose exec odysseus python -c \
+  "import ipex_llm; print('IPEX-LLM version:', ipex_llm.__version__)"
+
+# Check Odysseus logs for startup errors
+docker compose logs --tail=120 odysseus
+```
+
+**CPU fallback**
+
+If the GPU is not accessible (e.g., `/dev/dxg` is absent), Odysseus still
+boots and falls back to CPU inference. The XPU runtime inside the image is not
+activated unless the device is passed through and the serving backend requests
+it. No hard-fail on missing GPU.
+
+**Known constraints**
+
+- The IPEX-LLM base image is Ubuntu-based with Python 3.11; Odysseus's
+  `Dockerfile.ipex` installs app dependencies on top of that environment.
+- The image is larger than the standard Odysseus image because it includes the
+  full Intel oneAPI / IPEX-LLM stack.
+- The IPEX-LLM image is primarily maintained for native Linux Intel Arc. WSL2
+  passthrough via `/dev/dxg` is best-effort; GPU-accelerated inference may
+  require native Linux for reliable operation.
+- If you already run Ollama or another OpenAI-compatible server on the Windows
+  host, pointing Odysseus at `http://host.docker.internal:11434/v1` via
+  Settings is often simpler than building the IPEX image.
 
 Open `http://localhost:7000`, log in with the generated admin password,
 and configure everything else inside **Settings**.
