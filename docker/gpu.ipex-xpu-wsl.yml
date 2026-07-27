@@ -1,0 +1,59 @@
+# Intel IPEX-LLM XPU overlay for WSL2 (Windows + Ubuntu on WSL2 + Intel Arc).
+# Enable with:
+#   COMPOSE_FILE=docker-compose.yml:docker/gpu.ipex-xpu-wsl.yml
+#   IPEX_LLM_MODEL=<HuggingFace model id, e.g. Qwen/Qwen2.5-7B-Instruct>
+#
+# Target host: Windows + Ubuntu under WSL2 + Docker + Intel Arc GPU.
+# WSL2 exposes the Intel GPU bridge through /dev/dxg and /usr/lib/wsl/lib,
+# not the native-Linux /dev/dri render nodes used by docker/gpu.ipex-xpu.yml.
+# Use this overlay when Docker runs inside Ubuntu on WSL2.
+#
+# This overlay differs from docker/gpu.ipex-xpu.yml (which targets bare-metal
+# or native-VM Linux with the i915 DRM kernel driver and /dev/dri nodes).
+#
+# This overlay:
+#   1. Passes /dev/dxg and /usr/lib/wsl/lib into Odysseus for WSL GPU access.
+#   2. Adds an ipex-llm sidecar (intel/ipex-llm-inference-xpu) configured for
+#      the WSL GPU bridge, serving an OpenAI-compatible API on port 8000.
+#
+# Prerequisites:
+#   - Windows 11/10 with WSL2 GPU support and a current Intel Arc driver.
+#   - Ubuntu under WSL2 with /dev/dxg and /usr/lib/wsl/lib present.
+#   - Docker running inside that WSL distro.
+#
+# Run the read-only diagnostic before enabling:
+#   scripts/check-docker-ipex-xpu-wsl-gpu.sh
+#
+# After starting the stack, set IPEX_LLM_MODEL in .env, then add the endpoint
+# in Odysseus Settings -> Servers:
+#   http://ipex-llm:8000/v1  (reachable within the Compose stack)
+# From the host, verify the API is up:
+#   curl http://localhost:8000/v1/models
+#
+# The ipex-llm container downloads the model from HuggingFace on first boot
+# (or reads it from ./data/huggingface if already cached). Set HF_TOKEN in
+# .env when the model requires authentication.
+services:
+  odysseus:
+    devices:
+      - /dev/dxg
+    volumes:
+      - /usr/lib/wsl/lib:/usr/lib/wsl/lib:ro
+    environment:
+      - LD_LIBRARY_PATH=/usr/lib/wsl/lib
+  ipex-llm:
+    image: intel/ipex-llm-inference-xpu:latest
+    devices:
+      - /dev/dxg
+    volumes:
+      - /usr/lib/wsl/lib:/usr/lib/wsl/lib:ro
+      - ${APP_DATA_DIR:-./data}/huggingface:/root/.cache/huggingface:z
+    environment:
+      - MODEL_PATH=${IPEX_LLM_MODEL:-}
+      - IPEX_LLM_LOAD_IN_LOW_BIT=${IPEX_LLM_LOAD_IN_LOW_BIT:-sym_int4}
+      - HF_TOKEN=${HF_TOKEN:-}
+      - HUGGING_FACE_HUB_TOKEN=${HUGGING_FACE_HUB_TOKEN:-}
+      - LD_LIBRARY_PATH=/usr/lib/wsl/lib
+    ports:
+      - "127.0.0.1:8000:8000"
+    restart: unless-stopped
