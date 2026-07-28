@@ -288,7 +288,8 @@ def test_ipex_xpu_odysseus_adds_only_overlay(base):
     svc = standalone["services"][SERVICE]
     base_svc = base["services"][SERVICE]
 
-    # Intel DRI devices and GPU groups are added; environment is unchanged.
+    # Intel build target and DRI GPU groups are added; environment is unchanged.
+    assert svc["build"] == {"context": ".", "dockerfile": "Dockerfile.ipex"}
     assert "devices" not in base_svc
     assert svc["devices"] == ["/dev/dri"]
     assert "group_add" not in base_svc
@@ -312,7 +313,7 @@ def test_ipex_xpu_ipex_llm_service_shape():
     standalone = _load(IPEX_XPU_STANDALONE)
     svc = standalone["services"]["ipex-llm"]
 
-    assert svc["image"] == "intel/ipex-llm-inference-xpu:latest"
+    assert svc["image"] == "intelanalytics/ipex-llm-inference-cpp-xpu"
     assert svc["devices"] == ["/dev/dri"]
     assert svc["group_add"] == ["video", "${RENDER_GID:-render}"]
     assert "127.0.0.1:8000:8000" in svc["ports"]
@@ -350,7 +351,8 @@ def test_ipex_xpu_wsl_odysseus_adds_only_overlay(base):
     svc = standalone["services"][SERVICE]
     base_svc = base["services"][SERVICE]
 
-    # WSL GPU bridge device; no /dev/dri or group_add.
+    # WSL build target and bridge device; no /dev/dri or group_add.
+    assert svc["build"] == {"context": ".", "dockerfile": "Dockerfile.ipex"}
     assert "devices" not in base_svc
     assert svc["devices"] == ["/dev/dxg"]
     assert "group_add" not in svc
@@ -378,7 +380,7 @@ def test_ipex_xpu_wsl_ipex_llm_service_shape():
     standalone = _load(IPEX_XPU_WSL_STANDALONE)
     svc = standalone["services"]["ipex-llm"]
 
-    assert svc["image"] == "intel/ipex-llm-inference-xpu:latest"
+    assert svc["image"] == "intelanalytics/ipex-llm-inference-cpp-xpu"
     # WSL bridge device; no /dev/dri or render-group entries.
     assert svc["devices"] == ["/dev/dxg"]
     assert "group_add" not in svc
@@ -403,4 +405,3 @@ def test_ipex_xpu_wsl_base_services_unchanged(base):
 def test_ipex_xpu_wsl_top_level_volumes_match_base(base):
     standalone = _load(IPEX_XPU_WSL_STANDALONE)
     assert standalone.get("volumes") == base.get("volumes")
-

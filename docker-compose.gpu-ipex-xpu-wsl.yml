@@ -13,7 +13,9 @@
 # Set IPEX_LLM_MODEL to the HuggingFace model id in .env.
 services:
   odysseus:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile.ipex
     ports:
       - "${APP_BIND:-127.0.0.1}:${APP_PORT:-7000}:7000"
     volumes:

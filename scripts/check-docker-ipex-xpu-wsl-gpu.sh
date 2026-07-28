@@ -161,9 +161,9 @@ _print_next_steps() {
     echo "Verify Odysseus itself sees the WSL GPU bridge:"
     echo "  docker compose exec odysseus sh -lc 'test -e /dev/dxg && test -d /usr/lib/wsl/lib && echo \$LD_LIBRARY_PATH && ls -l /dev/dxg /usr/lib/wsl/lib | head'"
     echo
-    echo "Note: the slim Odysseus image does not bundle Intel oneAPI / Level Zero /"
-    echo "OpenCL userspace. The ipex-llm sidecar (intel/ipex-llm-inference-xpu)"
-    echo "provides the full Intel XPU inference stack and uses the WSL GPU bridge."
+    echo "Note: the ipex overlay builds Odysseus from Dockerfile.ipex on top of"
+    echo "intelanalytics/ipex-llm-inference-cpp-xpu and also starts an ipex-llm"
+    echo "sidecar on the same Intel runtime image (with WSL GPU bridge wiring)."
 }
 
 echo "=== Odysseus Intel IPEX-LLM XPU (WSL2) Docker diagnostic ==="
