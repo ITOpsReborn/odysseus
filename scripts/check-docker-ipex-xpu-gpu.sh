@@ -221,9 +221,9 @@ _print_next_steps() {
     echo "Verify Odysseus itself sees the Intel DRI devices:"
     echo "  docker compose exec odysseus sh -lc 'test -d /dev/dri && ls -l /dev/dri/renderD*'"
     echo
-    echo "Note: the slim Odysseus image does not bundle Intel oneAPI / Level Zero /"
-    echo "OpenCL userspace. The ipex-llm sidecar (intel/ipex-llm-inference-xpu)"
-    echo "provides the full Intel XPU inference stack."
+    echo "Note: the ipex overlay builds Odysseus from Dockerfile.ipex on top of"
+    echo "intelanalytics/ipex-llm-inference-cpp-xpu and also starts an ipex-llm"
+    echo "sidecar on the same Intel runtime image."
 }
 
 echo "=== Odysseus Intel IPEX-LLM XPU (native Linux) Docker diagnostic ==="

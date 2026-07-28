@@ -12,8 +12,10 @@
 # or native-VM Linux with the i915 DRM kernel driver and /dev/dri nodes).
 #
 # This overlay:
-#   1. Passes /dev/dxg and /usr/lib/wsl/lib into Odysseus for WSL GPU access.
-#   2. Adds an ipex-llm sidecar (intel/ipex-llm-inference-xpu) configured for
+#   1. Builds Odysseus from Dockerfile.ipex, which is based on
+#      intelanalytics/ipex-llm-inference-cpp-xpu.
+#   2. Passes /dev/dxg and /usr/lib/wsl/lib into Odysseus for WSL GPU access.
+#   3. Adds an ipex-llm sidecar (intelanalytics/ipex-llm-inference-cpp-xpu) configured for
 #      the WSL GPU bridge, serving an OpenAI-compatible API on port 8000.
 #
 # Prerequisites:
@@ -35,6 +37,9 @@
 # .env when the model requires authentication.
 services:
   odysseus:
+    build:
+      context: .
+      dockerfile: Dockerfile.ipex
     devices:
       - /dev/dxg
     volumes:
@@ -42,7 +47,7 @@ services:
     environment:
       - LD_LIBRARY_PATH=/usr/lib/wsl/lib
   ipex-llm:
-    image: intel/ipex-llm-inference-xpu:latest
+    image: intelanalytics/ipex-llm-inference-cpp-xpu
     devices:
       - /dev/dxg
     volumes:

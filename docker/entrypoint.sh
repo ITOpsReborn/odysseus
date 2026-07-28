@@ -135,6 +135,10 @@ export VLLM_USE_FLASHINFER_SAMPLER="${VLLM_USE_FLASHINFER_SAMPLER:-0}"
 # vLLM and helper scripts land here because /app is the non-root user's HOME.
 export PATH="/app/.local/bin:$PATH"
 
+if [ -n "${ODYSSEUS_RUNTIME_VARIANT:-}" ]; then
+    echo "Odysseus runtime variant: ${ODYSSEUS_RUNTIME_VARIANT}"
+fi
+
 # Run first-time setup as the app user so data/ files get the right ownership.
 # setup.py is idempotent — skips auth.json / .env if they already exist.
 # || true so a setup failure never prevents the container from starting.

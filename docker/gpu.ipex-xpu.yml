@@ -12,8 +12,10 @@
 # /dev/dxg). Use this overlay for bare-metal or native-VM Intel Arc installs.
 #
 # This overlay:
-#   1. Passes /dev/dri through to Odysseus for Intel GPU-accelerated workloads.
-#   2. Adds an ipex-llm sidecar (intel/ipex-llm-inference-xpu) that serves
+#   1. Builds Odysseus from Dockerfile.ipex, which is based on
+#      intelanalytics/ipex-llm-inference-cpp-xpu.
+#   2. Passes /dev/dri through to Odysseus for Intel GPU-accelerated workloads.
+#   3. Adds an ipex-llm sidecar (intelanalytics/ipex-llm-inference-cpp-xpu) that serves
 #      models through an OpenAI-compatible API on port 8000.
 #
 # After starting the stack, set IPEX_LLM_MODEL in .env, then add the endpoint
@@ -27,13 +29,16 @@
 # .env when the model requires authentication.
 services:
   odysseus:
+    build:
+      context: .
+      dockerfile: Dockerfile.ipex
     devices:
       - /dev/dri
     group_add:
       - video
       - ${RENDER_GID:-render}
   ipex-llm:
-    image: intel/ipex-llm-inference-xpu:latest
+    image: intelanalytics/ipex-llm-inference-cpp-xpu
     devices:
       - /dev/dri
     group_add:

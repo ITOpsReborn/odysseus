@@ -1,0 +1,69 @@
+# ---- builder: patch + build wheels for Real-ESRGAN's broken-on-3.14 deps ----
+FROM python:3.14-slim AS realesrgan-wheels
+RUN apt-get update && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/*
+COPY docker/build-realesrgan-wheels.sh /usr/local/bin/build-realesrgan-wheels.sh
+RUN bash /usr/local/bin/build-realesrgan-wheels.sh /wheels
+
+FROM intelanalytics/ipex-llm-inference-cpp-xpu
+
+LABEL org.odysseus.runtime.variant="ipex-llm-cpp-xpu"
+ENV ODYSSEUS_RUNTIME_VARIANT=ipex-llm-cpp-xpu
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    cmake \
+    curl \
+    git \
+    nodejs \
+    npm \
+    tmux \
+    openssh-client \
+    gosu \
+    python3 \
+    python3-pip \
+    python3-venv \
+    libgl1 \
+    libglib2.0-0 \
+    libxcb1 \
+    libmagic1 \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN ln -sf /usr/bin/python3 /usr/local/bin/python
+
+ARG DOCKER_CLI_VERSION=27.5.1
+RUN ARCH="$(dpkg --print-architecture)" \
+    && case "$ARCH" in \
+         amd64) DARCH=x86_64 ;; \
+         arm64) DARCH=aarch64 ;; \
+         *) echo "unsupported arch $ARCH"; exit 1 ;; \
+       esac \
+    && curl -fsSL "https://download.docker.com/linux/static/stable/${DARCH}/docker-${DOCKER_CLI_VERSION}.tgz" \
+       -o /tmp/docker.tgz \
+    && tar -xzf /tmp/docker.tgz -C /tmp \
+    && install -m 0755 /tmp/docker/docker /usr/local/bin/docker \
+    && rm -rf /tmp/docker /tmp/docker.tgz
+
+WORKDIR /app
+
+ARG INSTALL_OPTIONAL=false
+COPY requirements.txt requirements-optional.txt ./
+RUN python3 -m pip install --no-cache-dir -r requirements.txt \
+    && if [ "$INSTALL_OPTIONAL" = "true" ]; then python3 -m pip install --no-cache-dir -r requirements-optional.txt; fi
+
+RUN python3 -m pip install --no-cache-dir python-magic==0.4.27
+
+COPY --from=realesrgan-wheels /wheels/ /tmp/odysseus-wheels/
+RUN python3 -m pip install --no-cache-dir --no-deps /tmp/odysseus-wheels/*.whl \
+    && rm -rf /tmp/odysseus-wheels
+
+COPY . .
+RUN mkdir -p data logs services/cache/search
+
+COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
+
+EXPOSE 7000
+
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "7000"]

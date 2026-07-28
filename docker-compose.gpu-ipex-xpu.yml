@@ -13,7 +13,9 @@
 # See docker/gpu.ipex-xpu.yml and docs/setup.md for details.
 services:
   odysseus:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile.ipex
     ports:
       - "${APP_BIND:-127.0.0.1}:${APP_PORT:-7000}:7000"
     volumes:
@@ -97,7 +99,7 @@ services:
       - ${RENDER_GID:-render}
 
   ipex-llm:
-    image: intel/ipex-llm-inference-xpu:latest
+    image: intelanalytics/ipex-llm-inference-cpp-xpu
     devices:
       - /dev/dri
     group_add:
