@@ -98,7 +98,7 @@ services:
       - /dev/dxg
 
   ipex-llm:
-    image: intel/ipex-llm-inference-xpu:latest
+    image: intelanalytics/ipex-llm-inference-cpp-xpu
     devices:
       - /dev/dxg
     volumes:
